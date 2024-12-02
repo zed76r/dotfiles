@@ -1,0 +1,5 @@
+PROCESS-NAME,*Binance Helper*
+DOMAIN-KEYWORD,binance
+DOMAIN-KEYWORD,saasexch
+DOMAIN-KEYWORD,yingwangtech
+RULE-SET,https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Surge/Binance/Binance.list,update-interval=86400
