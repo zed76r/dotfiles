@@ -91,8 +91,8 @@ install_zimfw() {
 
 install_starship() {
   local current= archive checksum expected extracted
-  if (( $+commands[starship] )); then
-    current=$(command starship --version 2>/dev/null | awk 'NR == 1 {print $2}')
+  if [[ -x "$BIN_DIR/starship" ]]; then
+    current=$("$BIN_DIR/starship" --version 2>/dev/null | awk 'NR == 1 {print $2}')
   fi
   [[ "$current" == "$STARSHIP_VERSION" ]] && return 0
 
@@ -112,8 +112,8 @@ install_starship() {
 
 install_mise() {
   local current= binary sums expected
-  if (( $+commands[mise] )); then
-    current=$(command mise --version 2>/dev/null | awk 'NR == 1 {print $1}')
+  if [[ -x "$BIN_DIR/mise" ]]; then
+    current=$("$BIN_DIR/mise" --version 2>/dev/null | awk 'NR == 1 {print $1}')
   fi
   [[ "$current" == "$MISE_VERSION" ]] && return 0
 
