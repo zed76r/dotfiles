@@ -1,0 +1,26 @@
+# Secrets and credentials
+.zsh/gitlab-token
+*.key
+*.pem
+.env
+
+# Histories and sessions
+.zsh_history
+.zsh_sessions/
+.zsh/codex-zdotdir/.zsh_history
+.zsh/codex-zdotdir/.zsh_sessions/
+
+# Generated completions and caches
+.zcompdump*
+.zsh/codex-zdotdir/.zcompdump*
+.zsh/completions/
+.cache/
+
+# Machine-local managers and binaries
+.local/
+.zim/
+
+# Backups and OS metadata
+*.bak
+*.zwc
+.DS_Store

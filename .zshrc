@@ -1,21 +1,17 @@
-#!/usr/bin/env zsh
-[ -z "$ZPROF" ] || zmodload zsh/zprof
-. $HOME/.zsh/*.zsh
+[[ -n ${ZPROF:-} ]] && zmodload zsh/zprof
 
-# Zinit init
-ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
-if [[ ! -d "$ZINIT_HOME" ]]; then
-    mkdir -p "$(dirname $ZINIT_HOME)"
-    git clone https://github.com/zdharma-continuum/zinit.git "$ZINIT_HOME" -o origin
+for _zsh_file in "$HOME"/.zsh/*.zsh(N); do
+  source "$_zsh_file"
+done
+unset _zsh_file
+
+if command ls --color=auto -d . >/dev/null 2>&1; then
+  alias ls='ls --color=auto'
+  (( $+commands[dir] )) && alias dir='dir --color=auto'
+  (( $+commands[vdir] )) && alias vdir='vdir --color=auto'
+else
+  alias ls='ls -G'
 fi
-
-source "${ZINIT_HOME}/zinit.zsh"
-
-
-# some more ls aliases
-alias ls='ls --color=auto'
-alias dir='dir --color=auto'
-alias vdir='vdir --color=auto'
 alias grep='grep --color=auto'
 alias fgrep='fgrep --color=auto'
 alias egrep='egrep --color=auto'
@@ -23,97 +19,64 @@ alias ll='ls -alFh'
 alias la='ls -A'
 alias l='ls -CF'
 
-
-#set history
-[ -z "$HISTFILE" ] && HISTFILE="$HOME/.zsh_history"
-HISTSIZE=10000
+HISTFILE=${HISTFILE:-$HOME/.zsh_history}
+HISTSIZE=50000
 SAVEHIST=$HISTSIZE
-setopt extended_history       # record timestamp of command in HISTFILE
-setopt hist_expire_dups_first # delete duplicates first when HISTFILE size exceeds HISTSIZE
-setopt hist_ignore_all_dups   # ignore duplicated commands history list
-setopt hist_ignore_space      # ignore commands that start with space
+setopt extended_history hist_expire_dups_first hist_ignore_all_dups hist_ignore_space
 
-
-#  as"completion" https://github.com/docker/cli/blob/master/contrib/completion/zsh/_docker \
-
-#   as"completion" has"kubectl" id-as"kubectl--completion" \
-#   atpull'%atclone' atclone"kubectl completion zsh > _kubectl; zinit creinstall -q kubectl--completion" \
-#   run-atpull nocompile zdharma-continuum/null \
-
-#   as"completion" has"k3d" id-as"k3d--completion" \
-#   atpull'%atclone' atclone"k3d completion zsh > _k3d; zinit creinstall -q k3d--completion" \
-#   run-atpull nocompile zdharma-continuum/null \
-
-# completion
-
-zinit wait lucid for \
-    atload"zicompinit; zicdreplay" \
-    blockf \
-    lucid \
-    wait \
-  zsh-users/zsh-completions \
-  as"completion" has"kubectl" id-as"kubectl--completion" \
-  atpull'%atclone' atclone"kubectl completion zsh > _kubectl; zinit creinstall -q kubectl--completion" \
-  run-atpull nocompile zdharma-continuum/null \
-  as"completion" has"k3s" id-as"k3s--completion" \
-  atpull'%atclone' atclone"k3s completion zsh > _k3s; zinit creinstall -q k3s--completion" \
-  run-atpull nocompile zdharma-continuum/null \
-  as"completion" has"flux" id-as"flux--completion" \
-  atpull'%atclone' atclone"flux completion zsh > _flux; zinit creinstall -q flux--completion" \
-  run-atpull nocompile zdharma-continuum/null 
-
-# Load starship theme
 export STARSHIP_CONFIG="$HOME/.zsh/starship.toml"
-zinit ice from"gh-r" as"command" atload'precmd_functions+=(precmd_title); eval "$(starship init zsh)"'
-zinit light starship/starship
+if (( $+commands[starship] )); then
+  (( $+functions[precmd_title] )) && precmd_functions+=(precmd_title)
+  eval "$(starship init zsh)"
+fi
 
-# plugins
-ZSH_CACHE_DIR=~/.cache
+export ZIM_CONFIG_FILE="$HOME/.zsh/zimrc"
+export ZIM_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/zim"
+if [[ -r "$ZIM_HOME/init.zsh" ]]; then
+  source "$ZIM_HOME/init.zsh"
+  [[ "$ZIM_HOME/init.zsh" -nt "$ZIM_CONFIG_FILE" ]] ||
+    print -u2 -- 'zimfw: configuration changed; run zsh ~/.zsh/bin/shell-bootstrap.zsh'
+else
+  print -u2 -- 'zimfw: not installed; run zsh ~/.zsh/bin/shell-bootstrap.zsh'
+fi
 
-zinit wait lucid for \
-    atinit"ZINIT[COMPINIT_OPTS]=-C; zicompinit; zicdreplay" \
-    zdharma-continuum/fast-syntax-highlighting \
-    blockf \
-    zsh-users/zsh-completions \
-    atload"!_zsh_autosuggest_start" \
-    zsh-users/zsh-autosuggestions
+if (( $+commands[mise] )); then
+  eval "$(mise activate zsh)"
+fi
 
-zinit wait lucid light-mode for \
-    OMZP::jump \
-    OMZP::sudo \
-    zdharma-continuum/fast-syntax-highlighting \
-    atload"!_zsh_autosuggest_start" \
-    atinit"
-        zstyle ':completion:*' completer _expand _complete _ignored _approximate
-        zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
-        zstyle ':completion:*' menu select=2
-        zstyle ':completion:*' select-prompt '%SScrolling active: current selection at %p%s'
-        zstyle ':completion:*:descriptions' format '-- %d --'
-        zstyle ':completion:*:processes' command 'ps -au$USER'
-        zstyle ':completion:complete:*:options' sort false
-        zstyle ':completion:*:*:*:*:processes' command 'ps -u $USER -o pid,user,comm,cmd -w -w'
-        zstyle ':completion:*:*:docker:*' option-stacking yes
-        zstyle ':completion:*:*:docker-*:*' option-stacking yes
-    " \
-    zsh-users/zsh-autosuggestions \
-    bindmap"^R -> ^H" atinit"
-        zstyle :history-search-multi-word page-size 10
-        zstyle :history-search-multi-word highlight-color fg=red,bold
-        zstyle :plugin:history-search-multi-word reset-prompt-protect 1
-    " \
-    zdharma-continuum/history-search-multi-word \
-    reset \
-    atclone"dircolors -b LS_COLORS > clrs.zsh" atpull'%atclone' pick"clrs.zsh" nocompile'!' \
-    atload'zstyle ":completion:*" list-colors “${(s.:.)LS_COLORS}”' \
-    trapd00r/LS_COLORS
+typeset -g ZSH_COMPLETION_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/completions"
+[[ -d "$ZSH_COMPLETION_CACHE" ]] && fpath=("$ZSH_COMPLETION_CACHE" $fpath)
 
-# programs
+autoload -Uz compinit
+typeset -g ZSH_COMPDUMP="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompdump-${ZSH_VERSION}"
+mkdir -p "${ZSH_COMPDUMP:h}"
+if [[ -s "$ZSH_COMPDUMP" && "$ZSH_COMPDUMP" -nt "$ZIM_CONFIG_FILE" &&
+      ( ! -e "$ZIM_HOME/init.zsh" || "$ZSH_COMPDUMP" -nt "$ZIM_HOME/init.zsh" ) ]]; then
+  compinit -C -d "$ZSH_COMPDUMP"
+else
+  compinit -d "$ZSH_COMPDUMP"
+fi
 
-# 'n' program need load immediately
- 
-zinit light-mode for \
-    as'command' atinit'export N_PREFIX="$HOME/.n"; export N_USE_XZ=true; export N_NODE_MIRROR=https://npmmirror.com/mirrors/node; [[ :$PATH: == *":$N_PREFIX/bin:"* ]] || PATH+=":$N_PREFIX/bin"' pick"bin/n" \
-    tj/n
+(( $+functions[_codex_with_effort] && $+functions[_codex] )) &&
+  compdef _codex_with_effort codex
 
+zstyle ':completion:*' menu select=2
+zstyle ':history-search-multi-word' page-size 10
+zstyle ':history-search-multi-word' highlight-color 'fg=red,bold'
+zstyle ':plugin:history-search-multi-word' reset-prompt-protect 1
+(( $+widgets[history-search-multi-word] )) && bindkey '^R' history-search-multi-word
 
-[ -z "$ZPROF" ] || zprof
+if (( $+commands[dircolors] )); then
+  eval "$(dircolors -b)"
+elif (( $+commands[gdircolors] )); then
+  eval "$(gdircolors -b)"
+fi
+[[ -n ${LS_COLORS:-} ]] && zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+
+if [[ "$TERM_PROGRAM" == vscode ]] && (( $+commands[code] )); then
+  _vscode_shell_integration=$(code --locate-shell-integration-path zsh 2>/dev/null)
+  [[ -r "$_vscode_shell_integration" ]] && source "$_vscode_shell_integration"
+  unset _vscode_shell_integration
+fi
+
+[[ -n ${ZPROF:-} ]] && zprof

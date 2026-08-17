@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+url="$*"
+echo "start tailing $url"
+tmpFile=$(mktemp)
+trap 'rm $tmpFile' EXIT
+
+(while true; do wget -ca "$tmpFile" -O "$tmpFile" -o /dev/null "$url"; sleep 2; done)&
+pid=$!
+trap 'kill $pid; rm $tmpFile' EXIT
+
+tail -f "$tmpFile"

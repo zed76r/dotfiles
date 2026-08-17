@@ -1,0 +1,7 @@
+zmodule zsh-users/zsh-completions --fpath src
+zmodule ohmyzsh/ohmyzsh --root plugins/jump
+zmodule ohmyzsh/ohmyzsh --root plugins/sudo
+zmodule zdharma-continuum/history-search-multi-word
+zmodule zsh-users/zsh-autosuggestions
+# Must remain last so it can wrap widgets created by earlier modules and Starship.
+zmodule zdharma-continuum/fast-syntax-highlighting

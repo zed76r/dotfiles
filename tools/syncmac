@@ -1,0 +1,342 @@
+#!/usr/bin/env zsh
+
+# 首次运行：确保在 ~/.local/bin 下创建同名软链接
+{
+    local script_dir script_file source_path link_path
+    script_dir="$(cd "$(dirname "$0")" && pwd -P)"
+    script_file="$(basename "$0")"
+    source_path="$script_dir/$script_file"
+    link_path="$HOME/.local/bin/$script_file"
+
+    if [[ ! -e "$link_path" ]]; then
+        mkdir -p "$HOME/.local/bin"
+        ln -s "$source_path" "$link_path" || {
+            echo "创建软链接失败：$link_path" >&2
+            exit 1
+        }
+        echo "已创建软链接：$link_path -> $source_path"
+        if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+            echo "提示：请将 $HOME/.local/bin 加入 PATH 后使用。"
+        fi
+        echo "请重新直接执行命令：$script_file"
+        exit 0
+    fi
+}
+
+function onFinished() {
+    rm -f -- "$files_list" "$filter_list"
+}
+
+trap onFinished EXIT
+
+set -xe
+dotfiles="$HOME/OneDrive/dotfiles"
+files_list=$(mktemp "${TMPDIR:-/tmp}/syncmac-files.XXXXXX")
+filter_list=$(mktemp "${TMPDIR:-/tmp}/syncmac-filter.XXXXXX")
+
+initial() {
+    mkdir -p "$HOME/.cache/sync-rsync"
+
+    if [[ -n "$FORCE" || -z $(command -v brew) ]]; then
+        echo "未安装 Homebrew，可能是全新系统，安装 Homebrew 和所需软件。"
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+        brew update
+        brew install gnupg wget mtr proxychains-ng
+    fi
+}
+
+initial
+
+ensure_gpg_services() {
+    if command -v gpgconf >/dev/null 2>&1; then
+        gpgconf --launch gpg-agent >/dev/null 2>&1 || true
+        gpgconf --launch keyboxd >/dev/null 2>&1 || true
+    fi
+}
+
+run_gpg_with_retry() {
+    local attempt
+    for attempt in 1 2 3; do
+        ensure_gpg_services
+        if gpg --batch "$@"; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+first_gpg_secret_key() {
+    run_gpg_with_retry --with-colons --list-secret-keys 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }'
+}
+
+replace_if_changed() {
+    local src_file target_file
+    src_file="$1"
+    target_file="$2"
+
+    if [[ -f "$target_file" ]] && cmp -s "$src_file" "$target_file"; then
+        rm -f "$src_file"
+        return 1
+    fi
+
+    mv "$src_file" "$target_file"
+    return 0
+}
+
+cat >"$files_list" <<EOF
+; zsh profiles
+.zsh/
+.zshenv
+.zshrc
+.zprofile
+
+; ssh
+.ssh/
+
+; vim
+.vimrc
+
+; proxychains
+.proxychains/
+
+; aria2
+.aria2/
+
+; git
+.gitconfig
+
+; npm / pnpm
+.npmrc
+Library/Preferences/pnpm/config.yaml
+
+; gradle
+.gradle/gradle.properties
+
+; frp
+.config/frp/
+.config/mise.toml
+
+; kubectl
+.kube/config
+
+; claude
+.claude/
+.claude.json
+
+; copilot
+.copilot/
+
+; codex / local agents
+.agents/
+.codex/
+.codex-local/
+
+EOF
+
+cat >"$filter_list" <<EOF
+- .git/
+- .DS_Store
+- *.pyc
+- *.pyo
+- __pycache__/
+- **/__pycache__/
+- **/__pycache__/**
+- github-copilot
+- .tmp
+- known_hosts*
+- .ssh/agent/
+
+# Shell secrets and machine-local generated state.
+- .zsh/gitlab-token
+- .zsh/codex-zdotdir/.zcompdump*
+- .zsh/codex-zdotdir/.zsh_history
+- .zsh/codex-zdotdir/.zsh_sessions/
+- .zsh/codex-zdotdir/.zsh_sessions/**
+- .zsh/completions/
+- .zsh/completions/**
+- .zsh/starship.toml.bak
+
++ .claude/hooks/
++ .claude/hooks/**
++ .claude/rules/
++ .claude/rules/**
++ .claude/skills/
++ .claude/skills/**
++ .claude/skills-archived/
++ .claude/skills-archived/**
++ .claude/settings.json
++ .claude/statusline-command.sh
+- .claude/**
+
++ .copilot/agents/
++ .copilot/agents/**
++ .copilot/config.json
++ .copilot/restart/
++ .copilot/restart/**
++ .copilot/skills/
++ .copilot/skills/**
+- .copilot/**
+
++ .agents/plugins/
++ .agents/plugins/**
++ .agents/skills/
+- .agents/skills/db-query/sockets/
+- .agents/skills/db-query/sockets/**
+- .agents/skills/gitlab-review-workspace/
+- .agents/skills/gitlab-review-workspace/**
++ .agents/skills/**
+- .agents/**
+
++ .codex/AGENTS.md
++ .codex/agents/
++ .codex/agents/**
++ .codex/hooks.json
++ .codex/hooks/
++ .codex/hooks/**
++ .codex/prompts/
++ .codex/prompts/**
++ .codex/rules/
++ .codex/rules/**
++ .codex/scripts/
++ .codex/scripts/**
++ .codex/common.config.toml
+# config.toml、凭据、运行时状态和桌面 App 生成的 MCP 均为平台专属。
+# common.config.toml is Mac-authored and is structurally injected into each
+# machine's active config; it is not a Codex profile or a complete config.
+- .codex/config.toml
+- .codex/**
+
++ .codex-local/plugins/
++ .codex-local/plugins/**
+- .codex-local/**
+EOF
+
+#### 上传开始 ####
+
+apply_codex_common() {
+    python3 "$HOME/.codex/scripts/codex-config-apply.py" --apply
+}
+
+capture_codex_common() {
+    python3 "$HOME/.codex/scripts/codex-config-apply.py" --capture
+}
+
+upload_r() {
+    # Upload starts from the active machine config. The injector captures only
+    # the explicit portable allowlist into common.config.toml; credentials,
+    # paths, MCP servers, projects, and runtime state remain machine-local.
+    capture_codex_common
+
+    rsync -arv --temp-dir="$HOME/.cache/sync-rsync" --delete --delete-excluded --progress --no-implied-dirs \
+        --files-from="$files_list" \
+        --filter="merge $filter_list" \
+        "$HOME"/ "$dotfiles"
+
+    upload_gpg
+}
+
+download_r() {
+    cd "$HOME"
+    count=$(find "$dotfiles" -type f | wc -l)
+    if [[ $count -eq 0 ]]; then
+        echo "没有备份，退出。"
+        exit 1
+    fi
+
+    rsync -arv --temp-dir="$HOME/.cache/sync-rsync" --delete --progress --no-implied-dirs \
+        --files-from="$files_list" \
+        --filter="merge $filter_list" \
+        "$dotfiles"/ "$HOME"/
+
+    apply_codex_common
+    chmod 600 .ssh/*
+    mkdir -p "$HOME/.local/bin"
+    if [[ -f "$HOME/.zsh/bin/tail-url" ]]; then
+        chmod 755 "$HOME/.zsh/bin/tail-url"
+        ln -fs "$HOME/.zsh/bin/tail-url" "$HOME/.local/bin/turl"
+    fi
+    if [[ -f "$HOME/.zsh/bin/pnpx" ]]; then
+        chmod 755 "$HOME/.zsh/bin/pnpx"
+        ln -fs "$HOME/.zsh/bin/pnpx" "$HOME/.local/bin/pnpx"
+    fi
+    download_gpg
+    cd -
+}
+
+upload_gpg() {
+    local remote_gpg tmp_pub tmp_sec changed
+    remote_gpg="$dotfiles/.gpg"
+    mkdir -p "$remote_gpg/"
+    tmp_pub=$(mktemp "${TMPDIR:-/tmp}/gpg-pub.XXXXXX")
+    tmp_sec=$(mktemp "${TMPDIR:-/tmp}/gpg-sec.XXXXXX")
+    changed=0
+    if ! run_gpg_with_retry --export >"$tmp_pub"; then
+        rm -f "$tmp_pub" "$tmp_sec"
+        echo "GPG 后端不可用，跳过 GPG 同步。"
+        return 0
+    fi
+    if ! run_gpg_with_retry --export-secret-keys >"$tmp_sec"; then
+        rm -f "$tmp_pub" "$tmp_sec"
+        echo "GPG 后端不可用，跳过 GPG 同步。"
+        return 0
+    fi
+    if [[ ! -s "$tmp_sec" ]]; then
+        rm -f "$tmp_pub" "$tmp_sec"
+        echo "未找到可导出的 GPG 私钥，跳过 GPG 同步。"
+        return 0
+    fi
+    if replace_if_changed "$tmp_pub" "$remote_gpg/pub.key"; then
+        changed=1
+    fi
+    if replace_if_changed "$tmp_sec" "$remote_gpg/sec.key"; then
+        changed=1
+    fi
+    if [[ $changed -eq 1 ]]; then
+        echo "GPG 已上传。"
+    else
+        echo "GPG 无变化，跳过覆盖。"
+    fi
+}
+
+download_gpg() {
+    remote_gpg="$dotfiles/.gpg"
+    if [[ ! -f "$remote_gpg/pub.key" || ! -f "$remote_gpg/sec.key" ]]; then
+        echo "未找到 GPG 备份文件，跳过 GPG 导入。"
+        return 0
+    fi
+    ensure_gpg_services
+    if ! run_gpg_with_retry --import "$remote_gpg"/pub.key; then
+        echo "GPG 后端不可用，跳过 GPG 导入。"
+        return 0
+    fi
+    if ! run_gpg_with_retry --import "$remote_gpg"/sec.key; then
+        echo "GPG 后端不可用，跳过 GPG 导入。"
+        return 0
+    fi
+    GPG_KEY=$(first_gpg_secret_key)
+    if [[ -z "$GPG_KEY" ]]; then
+        echo "GPG 导入完成，但当前无法读取密钥指纹，跳过信任设置。"
+        return 0
+    fi
+    echo -e "trust\n5\nquit" | gpg --command-fd 0 --edit-key "$GPG_KEY"
+    echo "GPG 已下载。"
+}
+
+## __main__
+
+while getopts "ud" optname; do
+    case "$optname" in
+    "u")
+        upload_r
+        ;;
+    "d")
+        download_r
+        ;;
+    *)
+        echo "无效的选项。"
+        exit 1
+        ;;
+    esac
+done

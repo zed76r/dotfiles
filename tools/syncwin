@@ -1,0 +1,383 @@
+#!/usr/bin/env bash
+
+# First run: ensure a same-name symlink exists in ~/.local/bin
+{
+    script_dir="$(cd "$(dirname "$0")" && pwd -P)"
+    script_file="$(basename "$0")"
+    source_path="$script_dir/$script_file"
+    link_path="$HOME/.local/bin/$script_file"
+
+    if [ ! -e "$link_path" ]; then
+        mkdir -p "$HOME/.local/bin"
+        if ln -s "$source_path" "$link_path"; then
+            echo "已创建软链接：$link_path -> $source_path"
+            case ":$PATH:" in
+                *":$HOME/.local/bin:"*) ;;
+                *) echo "提示：请将 $HOME/.local/bin 加入 PATH 后使用。" ;;
+            esac
+            echo "请重新直接执行命令：$script_file"
+            exit 0
+        else
+            echo "创建软链接失败：$link_path" >&2
+            exit 1
+        fi
+    fi
+}
+
+function onFinished() {
+    rm -f -- "$files_list" "$files_upload_list" "$filter_list" "$filter_upload_list"
+}
+
+trap onFinished EXIT
+
+set -xe
+dotfiles="$HOME/OneDrive/dotfiles"
+files_list=$(mktemp "${TMPDIR:-/tmp}/syncwin-files.XXXXXX")
+files_upload_list=$(mktemp "${TMPDIR:-/tmp}/syncwin-upload-files.XXXXXX")
+filter_list=$(mktemp "${TMPDIR:-/tmp}/syncwin-filter.XXXXXX")
+filter_upload_list=$(mktemp "${TMPDIR:-/tmp}/syncwin-upload-filter.XXXXXX")
+
+initial() {
+    local windows_root
+    windows_root=$(mount -f | grep drvfs | awk '{printf $3}')
+
+    mkdir -p "$HOME/.cache/sync-rsync"
+
+    if [[ ! -d "$HOME/OneDrive" ]]; then
+        echo "No soft link, create one."
+        ln -s "$windows_root/Users/Zed/OneDrive" "$HOME"/OneDrive
+    fi
+
+    if [[ ! -d "$HOME/Downloads" ]]; then
+        echo "No soft link, create one."
+        ln -s "$windows_root/Users/Zed/Downloads" "$HOME"/Downloads
+    fi
+
+    if [[ -n "$FORCE" || -z $(command -v zsh) ]]; then
+        echo "No ZSH installed, maybe fresh system, install every soft needed."
+        sudo apt update &&
+            sudo apt install -yqq \
+                zsh git vim curl \
+                dnsutils netcat-openbsd \
+                python3-pip wget \
+                zip unzip mtr-tiny rsync
+    fi
+
+}
+
+initial
+
+ensure_gpg_services() {
+    if command -v gpgconf >/dev/null 2>&1; then
+        gpgconf --launch gpg-agent >/dev/null 2>&1 || true
+        gpgconf --launch keyboxd >/dev/null 2>&1 || true
+    fi
+}
+
+run_gpg_with_retry() {
+    local attempt
+    for attempt in 1 2 3; do
+        ensure_gpg_services
+        if gpg --batch "$@"; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+first_gpg_secret_key() {
+    run_gpg_with_retry --with-colons --list-secret-keys 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }'
+}
+
+replace_if_changed() {
+    local src_file target_file
+    src_file="$1"
+    target_file="$2"
+
+    if [[ -f "$target_file" ]] && cmp -s "$src_file" "$target_file"; then
+        rm -f "$src_file"
+        return 1
+    fi
+
+    mv "$src_file" "$target_file"
+    return 0
+}
+
+cat >"$files_list" <<EOF
+; zsh profiles
+.zsh/
+.zshenv
+.zshrc
+.zprofile
+
+; ssh
+.ssh/
+
+; vim
+.vimrc
+
+; proxychains
+.proxychains/
+
+; aria2
+.aria2/
+
+; git
+.gitconfig
+
+; npm / pnpm
+.npmrc
+Library/Preferences/pnpm/config.yaml
+
+; gradle
+.gradle/gradle.properties
+
+; frp
+.config/frp/
+.config/mise.toml
+
+; kubectl
+.kube/config
+
+; claude
+.claude/
+.claude.json
+
+; copilot
+.copilot/
+
+; codex / local agents
+.agents/
+.codex/
+.codex-local/
+
+EOF
+
+# WSL never uploads Mac-authored shell declarations. Keep a separate files
+# list in addition to the upload filter so rsync does not even touch .zsh/
+# directory metadata.
+grep -Ev '^(\.zsh/|\.zshenv|\.zshrc|\.zprofile)$' "$files_list" > "$files_upload_list"
+
+cat >"$filter_list" <<EOF
+- .git/
+- .DS_Store
+- *.pyc
+- *.pyo
+- __pycache__/
+- **/__pycache__/
+- **/__pycache__/**
+- github-copilot
+- .tmp
+- known_hosts*
+- .ssh/agent/
+
+# Shell secrets and machine-local generated state.
+- .zsh/gitlab-token
+- .zsh/codex-zdotdir/.zcompdump*
+- .zsh/codex-zdotdir/.zsh_history
+- .zsh/codex-zdotdir/.zsh_sessions/
+- .zsh/codex-zdotdir/.zsh_sessions/**
+- .zsh/completions/
+- .zsh/completions/**
+- .zsh/starship.toml.bak
+
++ .claude/hooks/
++ .claude/hooks/**
++ .claude/rules/
++ .claude/rules/**
++ .claude/skills/
++ .claude/skills/**
++ .claude/skills-archived/
++ .claude/skills-archived/**
++ .claude/settings.json
++ .claude/statusline-command.sh
+- .claude/**
+
++ .copilot/agents/
++ .copilot/agents/**
++ .copilot/config.json
++ .copilot/restart/
++ .copilot/restart/**
++ .copilot/skills/
++ .copilot/skills/**
+- .copilot/**
+
++ .agents/plugins/
++ .agents/plugins/**
++ .agents/skills/
+- .agents/skills/db-query/sockets/
+- .agents/skills/db-query/sockets/**
+- .agents/skills/gitlab-review-workspace/
+- .agents/skills/gitlab-review-workspace/**
++ .agents/skills/**
+- .agents/**
+
++ .codex/AGENTS.md
++ .codex/agents/
++ .codex/agents/**
++ .codex/hooks.json
++ .codex/hooks/
++ .codex/hooks/**
++ .codex/prompts/
++ .codex/prompts/**
++ .codex/rules/
++ .codex/rules/**
++ .codex/scripts/
++ .codex/scripts/**
++ .codex/common.config.toml
+# config.toml, credentials, runtime state, and desktop-generated MCP entries
+# are platform-specific. common.config.toml is downloaded from macOS and
+# structurally injected; it is not a Codex profile or a complete config.
+- .codex/config.toml
+- .codex/**
+
++ .codex-local/plugins/
++ .codex-local/plugins/**
+- .codex-local/**
+EOF
+
+# The download filter includes the macOS-authored common source and injector.
+# For uploads, place their exclusions before that filter so WSL cannot replace
+# either file. Do not use --delete-excluded for WSL uploads: macOS is the
+# authority that removes stale excluded files from OneDrive.
+cat >"$filter_upload_list" <<EOF
+# Shared shell declarations are authored and uploaded only by macOS.
+- .zsh/
+- .zsh/**
+- .zshenv
+- .zshrc
+- .zprofile
+- .codex/common.config.toml
+- .codex/scripts/
+- .codex/scripts/**
+EOF
+cat "$filter_list" >>"$filter_upload_list"
+
+####upload start####
+
+apply_codex_common() {
+    python3 "$HOME/.codex/scripts/codex-config-apply.py" --apply
+}
+
+upload_r() {
+    # WSL is not the authority for Codex common configuration. Do not apply
+    # the macOS-authored source before upload: -u must not overwrite local
+    # managed values as a side effect. The upload filter below also keeps the
+    # shared source and injector out of WSL uploads; macOS updates them via
+    # syncmac -u.
+    rsync -arv --temp-dir="$HOME/.cache/sync-rsync" --delete --progress --no-implied-dirs \
+        --files-from="$files_upload_list" \
+        --filter="merge $filter_upload_list" \
+        "$HOME"/ "$dotfiles"
+
+    upload_gpg
+}
+
+download_r() {
+    cd "$HOME"
+    count=$(find "$dotfiles" -type f | wc -l)
+    if [[ $count -eq 0 ]]; then
+        echo "No backup, exit."
+        exit 1
+    fi
+
+    rsync -arv --temp-dir="$HOME/.cache/sync-rsync" --delete --progress --no-implied-dirs \
+        --files-from="$files_list" \
+        --filter="merge $filter_list" \
+        "$dotfiles"/ "$HOME"/
+
+    apply_codex_common
+    chmod 600 .ssh/*
+    mkdir -p "$HOME/.local/bin"
+    if [[ -f "$HOME/.zsh/bin/tail-url" ]]; then
+        chmod 755 "$HOME/.zsh/bin/tail-url"
+        ln -fs "$HOME/.zsh/bin/tail-url" "$HOME/.local/bin/turl"
+    fi
+    if [[ -f "$HOME/.zsh/bin/pnpx" ]]; then
+        chmod 755 "$HOME/.zsh/bin/pnpx"
+        ln -fs "$HOME/.zsh/bin/pnpx" "$HOME/.local/bin/pnpx"
+    fi
+    if [[ -r "$HOME/.zsh/bin/shell-bootstrap.zsh" ]]; then
+        zsh "$HOME/.zsh/bin/shell-bootstrap.zsh"
+    fi
+    download_gpg
+    cd -
+}
+
+upload_gpg() {
+    local remote_gpg tmp_pub tmp_sec changed
+    remote_gpg=$dotfiles/.gpg
+    mkdir -p "$remote_gpg/"
+    tmp_pub=$(mktemp "${TMPDIR:-/tmp}/gpg-pub.XXXXXX")
+    tmp_sec=$(mktemp "${TMPDIR:-/tmp}/gpg-sec.XXXXXX")
+    changed=0
+    if ! run_gpg_with_retry --export >"$tmp_pub"; then
+        rm -f "$tmp_pub" "$tmp_sec"
+        echo "GPG backend unavailable, skip GPG sync."
+        return 0
+    fi
+    if ! run_gpg_with_retry --export-secret-keys >"$tmp_sec"; then
+        rm -f "$tmp_pub" "$tmp_sec"
+        echo "GPG backend unavailable, skip GPG sync."
+        return 0
+    fi
+    if [[ ! -s "$tmp_sec" ]]; then
+        rm -f "$tmp_pub" "$tmp_sec"
+        echo "No exportable GPG secret key found, skip GPG sync."
+        return 0
+    fi
+    if replace_if_changed "$tmp_pub" "$remote_gpg/pub.key"; then
+        changed=1
+    fi
+    if replace_if_changed "$tmp_sec" "$remote_gpg/sec.key"; then
+        changed=1
+    fi
+    if [[ $changed -eq 1 ]]; then
+        echo "GPG uploaded."
+    else
+        echo "GPG unchanged, skip overwrite."
+    fi
+}
+
+download_gpg() {
+    remote_gpg=$dotfiles/.gpg
+    if [[ ! -f "$remote_gpg/pub.key" || ! -f "$remote_gpg/sec.key" ]]; then
+        echo "No GPG backup files found, skip GPG import."
+        return 0
+    fi
+    ensure_gpg_services
+    if ! run_gpg_with_retry --import "$remote_gpg"/pub.key; then
+        echo "GPG backend unavailable, skip GPG import."
+        return 0
+    fi
+    if ! run_gpg_with_retry --import "$remote_gpg"/sec.key; then
+        echo "GPG backend unavailable, skip GPG import."
+        return 0
+    fi
+    GPG_KEY=$(first_gpg_secret_key)
+    if [[ -z "$GPG_KEY" ]]; then
+        echo "GPG import finished, but the key fingerprint could not be read."
+        return 0
+    fi
+    # gpg --edit-key "$GPG_KEY" trust quit
+    echo -e "trust\n5\nquit" | gpg --command-fd 0 --edit-key "$GPG_KEY"
+    echo "GPG downloaded"
+}
+
+## __main__
+
+while getopts "ud" optname; do
+    case "$optname" in
+    "u")
+        upload_r
+        ;;
+    "d")
+        download_r
+        ;;
+    *)
+        echo "invalid opt."
+        exit 1
+        ;;
+    esac
+done
