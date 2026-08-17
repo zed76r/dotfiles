@@ -6,10 +6,12 @@ found=0
 
 case "$mode" in
   --staged)
+    scan_label=staged
     list_paths() { git diff --cached --name-only --diff-filter=ACMR -z; }
     show_path() { git show ":$1"; }
     ;;
   --tracked)
+    scan_label=tracked
     list_paths() { git ls-files -z; }
     show_path() { git show "HEAD:$1"; }
     ;;
@@ -91,4 +93,4 @@ if (( found )); then
   exit 1
 fi
 
-echo 'secret-scan: staged files passed'
+echo "secret-scan: $scan_label files passed"
