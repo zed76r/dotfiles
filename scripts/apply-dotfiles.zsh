@@ -39,5 +39,9 @@ for relative in "${sources[@]}"; do
   command mv -f "$target_file.new" "$target_file"
 done
 
+mkdir -p "$HOME/.local/bin"
+ln -fs "$HOME/.zsh/bin/pnpx" "$HOME/.local/bin/pnpx"
+ln -fs "$HOME/.zsh/bin/tail-url" "$HOME/.local/bin/turl"
+
 print -- "dotfiles applied; previous files saved under $BACKUP_ROOT"
 print -- 'next: zsh ~/.zsh/bin/shell-bootstrap.zsh'
