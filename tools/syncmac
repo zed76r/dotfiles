@@ -24,7 +24,7 @@
 }
 
 function onFinished() {
-    rm -f -- "$files_list" "$filter_list"
+    rm -f -- "$files_list" "$shell_files_list" "$filter_list"
 }
 
 trap onFinished EXIT
@@ -32,6 +32,7 @@ trap onFinished EXIT
 set -xe
 dotfiles="$HOME/OneDrive/dotfiles"
 files_list=$(mktemp "${TMPDIR:-/tmp}/syncmac-files.XXXXXX")
+shell_files_list=$(mktemp "${TMPDIR:-/tmp}/syncmac-shell-files.XXXXXX")
 filter_list=$(mktemp "${TMPDIR:-/tmp}/syncmac-filter.XXXXXX")
 
 initial() {
@@ -133,6 +134,13 @@ Library/Preferences/pnpm/config.yaml
 .codex/
 .codex-local/
 
+EOF
+
+cat >"$shell_files_list" <<EOF
+.zsh/
+.zshenv
+.zshrc
+.zprofile
 EOF
 
 cat >"$filter_list" <<EOF
@@ -237,6 +245,16 @@ upload_r() {
     upload_gpg
 }
 
+upload_shell_r() {
+    # Shell-only upload for configuration changes. It deliberately skips
+    # Codex capture, GPG export, SSH, kubeconfig, and every other credential-
+    # bearing category in the full upload path.
+    rsync -arv --temp-dir="$HOME/.cache/sync-rsync" --delete --delete-excluded --progress --no-implied-dirs \
+        --files-from="$shell_files_list" \
+        --filter="merge $filter_list" \
+        "$HOME"/ "$dotfiles"
+}
+
 download_r() {
     cd "$HOME"
     count=$(find "$dotfiles" -type f | wc -l)
@@ -326,13 +344,16 @@ download_gpg() {
 
 ## __main__
 
-while getopts "ud" optname; do
+while getopts "uds" optname; do
     case "$optname" in
     "u")
         upload_r
         ;;
     "d")
         download_r
+        ;;
+    "s")
+        upload_shell_r
         ;;
     *)
         echo "无效的选项。"

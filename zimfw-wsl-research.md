@@ -158,7 +158,7 @@ compdef _codex_with_effort codex
 1. 在 macOS 建立当前 `.zsh*` 和 `.zsh/` 的可恢复备份。
 2. 在隔离 `ZDOTDIR` 完成 Zimfw 配置和全功能验收，不先覆盖当前交互环境。
 3. 应用 macOS 配置，执行 `zsh -n`、启动、widget、hook、completion 和 PTY 延迟验收。
-4. 执行 `syncmac -u`，把声明性配置和 lock 上传到共享目录。
+4. 执行安全的 shell-only `syncmac -s`，把声明性配置和 lock 上传到共享目录；不触发 GPG/SSH/Kubeconfig 等完整备份路径。
 5. WSL **首先执行** `syncwin -d`，使其拿到完整的一致版本；不允许先 `syncwin -u`。
 6. `syncwin -d` 自动执行 `zsh ~/.zsh/bin/shell-bootstrap.zsh`，在 Linux 本机安装 Zimfw/modules、Starship、mise，并生成 completion；也可手工重复执行，结果幂等。
 7. 新开 shell 或 `exec zsh`，运行与 macOS 相同的功能验收。
@@ -172,7 +172,7 @@ bootstrap 必须可重复执行：已满足 lock 时不下载，半成品写在�
 
 建议沿用现有 Codex common config 的所有权模型：
 
-- `syncmac -u`：Mac 声明性配置 → OneDrive。
+- `syncmac -s`：Mac shell 声明性配置 → OneDrive，不处理 GPG、SSH、Kubeconfig 或 Codex 配置。
 - `syncwin -d`：OneDrive 声明性配置 → WSL，然后自动执行本机 bootstrap/apply。
 - `syncwin -u`：只上传 WSL 自有内容；当前实现已排除 Mac 权威的 `.zshrc`、`.zshenv`、`.zprofile` 和整个 `.zsh/` 声明目录。
 
@@ -180,7 +180,7 @@ bootstrap 必须可重复执行：已满足 lock 时不下载，半成品写在�
 
 更新有两种模式：
 
-1. 推荐的可复现模式：只在 Mac 执行 `shell-update.zsh --refresh-lock`，验证后 `syncmac -u`；WSL `syncwin -d` 后运行普通 bootstrap，收敛到新 lock。
+1. 推荐的可复现模式：只在 Mac 编辑并验证 `versions.lock`，运行 `shell-bootstrap.zsh` 后执行 `syncmac -s`；WSL `syncwin -d` 后由普通 bootstrap 收敛到新 lock。
 2. 滚动模式：两端分别执行 self-update/latest。操作简单，但会产生版本漂移，不符合“同步完成后两端一致”的主要目标。
 
 ## 验收标准

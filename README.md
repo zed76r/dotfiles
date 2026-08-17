@@ -7,7 +7,7 @@ Public, sanitized Zsh configuration shared between macOS and WSL.
 macOS is the authority for shared shell declarations:
 
 ```text
-macOS: edit and validate -> syncmac -u
+macOS: edit and validate -> syncmac -s
 WSL:   syncwin -d -> zsh ~/.zsh/bin/shell-bootstrap.zsh -> exec zsh
 ```
 
@@ -15,6 +15,10 @@ WSL must not upload the Mac-authored `.zshrc`, `.zshenv`, `.zprofile`, `.zsh/zim
 `.zsh/versions.lock`, or `.zsh/bin/` files. Machine-local binaries, Zimfw modules,
 completion output, compdump, histories, sessions, and credentials are never synced
 or committed.
+
+`syncmac -s` is the shell-only upload path. Unlike the legacy full `-u` path,
+it does not capture Codex configuration, export GPG secret keys, or include SSH,
+kubeconfig, and other credential-bearing categories.
 
 The live synchronization tools are backed up as [`tools/syncmac`](./tools/syncmac)
 and [`tools/syncwin`](./tools/syncwin). Repository copies must remain byte-identical
