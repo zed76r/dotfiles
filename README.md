@@ -72,3 +72,13 @@ completions, and `.env` files are excluded by `.gitignore` and must stay local.
 ## Design and benchmarks
 
 See [zimfw-wsl-research.md](./zimfw-wsl-research.md).
+
+Run the real-PTY first-key benchmark on macOS with:
+
+```bash
+python3 tests/pty-latency.py --samples 30
+```
+
+The Linux/WSL smoke test is designed for an ephemeral Debian container mounted
+at `/repo`; [`tests/debian-smoke.sh`](./tests/debian-smoke.sh) validates both
+native Linux and cross-architecture release assets.

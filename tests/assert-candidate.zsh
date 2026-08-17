@@ -4,7 +4,7 @@ set -euo pipefail
 typeset -a required_functions=(
   jump mark unmark marks sudo-command-line history-search-multi-word
   _zsh_highlight _zsh_autosuggest_start mise precmd_title
-  starship_zle-keymap-select
+  starship_zle-keymap-select _codex_with_effort
 )
 for name in "${required_functions[@]}"; do
   (( $+functions[$name] )) || { print -u2 -- "missing function: $name"; exit 1; }
@@ -34,6 +34,16 @@ done
 
 [[ ${_comps[mise]:-} == _mise ]] || { print -u2 -- 'mise completion not registered'; exit 1; }
 [[ -s "${XDG_CACHE_HOME:-$HOME/.cache}/zsh/completions/_mise" ]] || exit 1
+if (( $+commands[codex] && $+functions[_codex] )); then
+  [[ ${_comps[codex]:-} == _codex_with_effort ]] || {
+    print -u2 -- 'Codex completion overlay not registered'
+    exit 1
+  }
+fi
+
+(( $+functions[zinit] == 0 )) || { print -u2 -- 'Zinit unexpectedly loaded'; exit 1; }
+[[ ${commands[starship]:A} == "$HOME/.local/bin/starship" ]] || exit 1
+[[ ${commands[mise]:A} == "$HOME/.local/bin/mise" ]] || exit 1
 
 command starship --version
 command mise --version

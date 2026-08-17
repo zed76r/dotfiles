@@ -210,6 +210,17 @@ bootstrap 必须可重复执行：已满足 lock 时不下载，半成品写在�
 
 在这套边界下，迁移值得做：Zimfw 负责静态插件，独立 bootstrap/update 负责跨平台二进制与动态 completion，macOS lock 负责一致性，WSL 通过 `syncwin -d` 和本机重建获得相同功能。它能保留现有体验，并消除当前首键延迟的主要来源；代价是新增三段短脚本和一个 lock 文件，但职责更清楚，也比把平台二进制藏在插件管理器内部更适合 WSL。
 
+## 实施后验证记录
+
+2026-08-17 已完成实际切换和以下验证：
+
+- macOS arm64：固定版本安装、checksum、插件 commit、动态 completion 和真实 PTY 功能测试通过。
+- OrbStack 一次性 Debian arm64：cold bootstrap、Starship `1.26.0`、mise `2026.8.6 linux-arm64`、widgets/hooks/bindings/completion 通过。
+- OrbStack 一次性 Debian amd64：cold bootstrap、Starship `1.26.0`、mise `2026.8.6 linux-x64`、widgets/hooks/bindings/completion 通过，覆盖典型 x86_64 WSL 资产路径。
+- macOS 真实 HOME 的 30 次新 shell PTY：`startup -> ZLE ready` median `132.352 ms`、p95 `145.562 ms`；`first key -> ZLE redraw` median `1.116 ms`、p95 `1.276 ms`。
+
+最后一组 startup 指标以完整 prompt 后进入 ZLE 为终点，严格于 `zsh -i -c exit`，不应与前文的简单启动 p50 直接比较；首字符 redraw 则直接验证迁移后的输入路径不再出现原 Zinit 延迟调度造成的首键 hitch。
+
 ## 主要资料
 
 - [Zimfw 官方 README：手动安装、`ZIM_HOME`、`ZIM_CONFIG_FILE`、模块与更新命令](https://github.com/zimfw/zimfw)
