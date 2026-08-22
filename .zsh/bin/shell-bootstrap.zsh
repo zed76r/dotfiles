@@ -180,7 +180,11 @@ install_modules() {
 }
 
 update_zimfw_and_modules() {
-  source "$ZIM_HOME/zimfw.zsh" upgrade -q
+  local target="$ZIM_HOME/zimfw.zsh" candidate="$task_tmp_dir/zimfw.zsh.update"
+  download 'https://github.com/zimfw/zimfw/releases/latest/download/zimfw.zsh' "$candidate"
+  command zsh -n "$candidate"
+  command install -m 0644 "$candidate" "$target.new"
+  command mv -f "$target.new" "$target"
   source "$ZIM_HOME/zimfw.zsh" update -q
 }
 

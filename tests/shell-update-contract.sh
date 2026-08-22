@@ -14,8 +14,9 @@ shell_update="$repo_root/.zsh/bin/shell-update.zsh"
   exit 1
 }
 grep -Fq 'shell-bootstrap.zsh" --update' "$shell_update"
-grep -Fq 'source "$ZIM_HOME/zimfw.zsh" upgrade -q' "$bootstrap"
+grep -Fq "download 'https://github.com/zimfw/zimfw/releases/latest/download/zimfw.zsh'" "$bootstrap"
 grep -Fq 'source "$ZIM_HOME/zimfw.zsh" update -q' "$bootstrap"
+! grep -Fq 'source "$ZIM_HOME/zimfw.zsh" upgrade' "$bootstrap"
 grep -Fq 'install_starship_latest' "$bootstrap"
 grep -Fq 'install_mise_latest' "$bootstrap"
 
