@@ -60,7 +60,7 @@ latest_release_tag() {
     print -u2 -- 'shell-bootstrap: curl or wget is required to resolve latest releases'
     return 1
   fi
-  tag=$(print -r -- "$payload" | awk -F'"' '/"tag_name"[[:space:]]*:/ {print $4; exit}')
+  tag=$(print -r -- "$payload" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed -n '1p')
   [[ -n "$tag" ]] || {
     print -u2 -- "shell-bootstrap: latest release tag not found for $repo"
     return 1

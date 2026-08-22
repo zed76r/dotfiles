@@ -20,6 +20,13 @@ grep -Fq 'source "$ZIM_HOME/zimfw.zsh" update -q' "$bootstrap"
 grep -Fq 'install_starship_latest' "$bootstrap"
 grep -Fq 'install_mise_latest' "$bootstrap"
 
+release_json='{"url":"https://api.github.com/repos/example/releases/123","tag_name":"v9.9.9","html_url":"https://github.com/example/releases/tag/v9.9.9"}'
+latest_tag=$(printf '%s\n' "$release_json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed -n '1p')
+[[ "$latest_tag" == v9.9.9 ]] || {
+  echo 'shell-update-contract: single-line GitHub tag parsing failed' >&2
+  exit 1
+}
+
 dry_run=$(zsh "$shell_update" --dry-run)
 grep -Fq 'Zimfw modules' <<<"$dry_run"
 grep -Fq 'Starship, and mise' <<<"$dry_run"
