@@ -12,7 +12,7 @@ WSL:   syncwin -d -> zsh ~/.zsh/bin/shell-bootstrap.zsh -> exec zsh
 ```
 
 WSL must not upload the Mac-authored `.zshrc`, `.zshenv`, `.zprofile`, `.zsh/zimrc`,
-`.zsh/versions.lock`, or `.zsh/bin/` files. Machine-local binaries, Zimfw modules,
+or `.zsh/bin/` files. Machine-local binaries, Zimfw modules,
 completion output, compdump, histories, sessions, and credentials are never synced
 or committed.
 
@@ -48,15 +48,20 @@ The bootstrap installs platform-specific binaries into `~/.local/bin`, Zimfw and
 plugins into `${XDG_DATA_HOME:-~/.local/share}/zim`, and generated completions into
 `${XDG_CACHE_HOME:-~/.cache}/zsh/completions`.
 
-## Reproducible updates
+## Updates
 
-Versions and plugin commits are pinned in `.zsh/versions.lock`. Change the lock on
-macOS, run the bootstrap, perform interactive validation, and commit it. WSL then
-converges to the same lock after `syncwin -d`.
+The bootstrap is install-only for already-present tools. It installs missing Zimfw,
+modules, Starship, and mise, then refreshes completions. It does not run network
+updates during shell startup.
 
 `upgrade_all` updates the platform package manager and invokes
-`.zsh/bin/shell-update.zsh`; the latter reconciles locked shell infrastructure,
-refreshes completions, updates mise-managed tools, and invokes `codex update`.
+`.zsh/bin/shell-update.zsh`. The explicit update flow runs `zimfw upgrade`,
+`zimfw update`, latest Starship and mise releases, `mise up`, completion refresh,
+and `codex update`. Run `zsh ~/.zsh/bin/shell-update.zsh --dry-run` to inspect the
+planned shell updates without changing anything.
+
+Because versions are intentionally not pinned, macOS and WSL can converge to
+different upstream releases until the next explicit update on each machine.
 
 ## Secret protection
 

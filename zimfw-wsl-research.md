@@ -51,7 +51,6 @@
 ~/.zsh/bin/shell-bootstrap.zsh
 ~/.zsh/bin/shell-update.zsh
 ~/.zsh/bin/refresh-completions.zsh
-~/.zsh/versions.lock
 ```
 
 `~/.zsh/zimrc` 是唯一的模块声明文件，设置：
@@ -61,7 +60,7 @@ ZIM_CONFIG_FILE=$HOME/.zsh/zimrc
 ZIM_HOME=${XDG_DATA_HOME:-$HOME/.local/share}/zim
 ```
 
-`versions.lock` 固定 Zimfw 版本、插件 commit，以及 `starship`、`mise` 的版本。这样 macOS 与 WSL 使用相同声明和版本，而不是各自在某天碰巧安装到不同的 latest。
+`.zsh/zimrc` 固定模块来源，但不固定 commit；显式更新时两端分别跟随各自平台可用的最新 release。
 
 ### 2. 每台机器本地重建的状态
 
@@ -92,7 +91,8 @@ zsh-users/zsh-autosuggestions
 zdharma-continuum/fast-syntax-highlighting
 ```
 
-实际 `zimrc` 应锁定插件版本。Zimfw 原生支持 branch、tag 和 frozen，但不能直接把任意 commit 当作一等 revision；要严格复现当前 checkout SHA，可以让 `versions.lock` 记录 SHA，`shell-bootstrap.zsh` 在 `zimfw install` 后核对并 checkout 指定 commit，再执行 `zimfw build`。更新脚本则统一更新、写入新 lock，并重新构建。
+`zimrc` 只声明模块来源。普通 bootstrap 运行 `zimfw install`，显式更新运行
+`zimfw update`，再由 Zimfw 自己 build/compile；不再额外 checkout 固定 commit。
 
 `LS_COLORS` 不建议继续依赖当前空的 `clrs.zsh`。应选择一个明确、可验证的生成或静态配置来源，并在两端检查 `LS_COLORS` 非空和 `zstyle ':completion:*' list-colors` 的实际值。
 
@@ -100,17 +100,16 @@ zdharma-continuum/fast-syntax-highlighting
 
 两者安装到 `~/.local/bin`，不需要 Homebrew：
 
-- mise 官方为 macOS/Linux 提供 standalone binary installer，默认安装目录就是 `~/.local/bin`，支持固定 `MISE_VERSION`、自定义 `MISE_INSTALL_PATH` 和 `mise self-update`。
+- mise 官方为 macOS/Linux 提供 standalone binary installer，默认安装目录就是 `~/.local/bin`，支持 `mise self-update`。
 - Starship 官方安装器支持 macOS/Linux、`--bin-dir`、`--version` 和非交互安装。
 
 推荐 bootstrap 不直接在交互 shell 启动时执行 `curl | sh`，而是：
 
-1. 从 `versions.lock` 读取固定版本。
-2. 识别 `uname -s`、`uname -m`，下载对应 release 到临时目录。
-3. 校验发布方 checksum；mise 在可用环境进一步使用官方签名校验路径。
-4. 运行 `--version` 验证下载物。
-5. 原子移动到 `~/.local/bin`。
-6. 失败时保留现有可用版本，不覆盖。
+1. 仅在工具缺失时由 bootstrap 安装。
+2. 显式更新时解析 latest release，识别 `uname -s`、`uname -m`，下载对应 release 到临时目录。
+3. 校验发布方 checksum，运行 `--version` 验证下载物。
+4. 原子移动到 `~/.local/bin`。
+5. 失败时保留现有可用版本，不覆盖。
 
 `.zshrc` 只做本地、无网络初始化：
 
@@ -119,7 +118,7 @@ zdharma-continuum/fast-syntax-highlighting
 (( $+commands[starship] )) && eval "$(starship init zsh)"
 ```
 
-`upgrade_all` 应调用统一的 `shell-update.zsh`，不再调用 `zinit update`。更新必须是显式动作，不能发生在 shell startup。
+`upgrade_all` 调用统一的 `shell-update.zsh`，显式执行 `zimfw upgrade`、`zimfw update`、Starship/mise latest 更新、`mise up` 和 completion refresh；更新不能发生在 shell startup。
 
 ## Completion 设计
 
@@ -158,13 +157,13 @@ compdef _codex_with_effort codex
 1. 在 macOS 建立当前 `.zsh*` 和 `.zsh/` 的可恢复备份。
 2. 在隔离 `ZDOTDIR` 完成 Zimfw 配置和全功能验收，不先覆盖当前交互环境。
 3. 应用 macOS 配置，执行 `zsh -n`、启动、widget、hook、completion 和 PTY 延迟验收。
-4. 执行安全的 shell-only `syncmac -s`，把声明性配置和 lock 上传到共享目录；不触发 GPG/SSH/Kubeconfig 等完整备份路径。
+4. 执行安全的 shell-only `syncmac -s`，把声明性配置上传到共享目录；不触发 GPG/SSH/Kubeconfig 等完整备份路径。
 5. WSL **首先执行** `syncwin -d`，使其拿到完整的一致版本；不允许先 `syncwin -u`。
 6. `syncwin -d` 自动执行 `zsh ~/.zsh/bin/shell-bootstrap.zsh`，在 Linux 本机安装 Zimfw/modules、Starship、mise，并生成 completion；也可手工重复执行，结果幂等。
 7. 新开 shell 或 `exec zsh`，运行与 macOS 相同的功能验收。
 8. 两端都通过后，才清理旧 Zinit machine-local 数据；清理属于独立、可恢复操作，不是切换必要步骤。
 
-bootstrap 必须可重复执行：已满足 lock 时不下载，半成品写在临时目录，全部校验通过后才替换。任何失败都不能破坏已有二进制、插件 checkout 或当前可用 shell。
+bootstrap 必须可重复执行：已有工具时不联网更新，半成品写在临时目录，全部校验通过后才替换。任何失败都不能破坏已有二进制、模块 checkout 或当前可用 shell。
 
 ## 后续同步和更新语义
 
@@ -178,10 +177,7 @@ bootstrap 必须可重复执行：已满足 lock 时不下载，半成品写在�
 
 若仍希望 WSL 编辑通用 shell 配置，应改成 Git 分支/变更审核，而不是让 `syncwin -u` 隐式决定最后写入者。
 
-更新有两种模式：
-
-1. 推荐的可复现模式：只在 Mac 编辑并验证 `versions.lock`，运行 `shell-bootstrap.zsh` 后执行 `syncmac -s`；WSL `syncwin -d` 后由普通 bootstrap 收敛到新 lock。
-2. 滚动模式：两端分别执行 self-update/latest。操作简单，但会产生版本漂移，不符合“同步完成后两端一致”的主要目标。
+更新采用滚动 latest 模式：`upgrade_all` 在每台机器上显式执行更新；`syncwin -d` 只同步声明并安装缺失工具，不会强制另一台机器回退到相同版本。
 
 ## 验收标准
 
@@ -208,7 +204,7 @@ bootstrap 必须可重复执行：已满足 lock 时不下载，半成品写在�
 
 ## 最终判断
 
-在这套边界下，迁移值得做：Zimfw 负责静态插件，独立 bootstrap/update 负责跨平台二进制与动态 completion，macOS lock 负责一致性，WSL 通过 `syncwin -d` 和本机重建获得相同功能。它能保留现有体验，并消除当前首键延迟的主要来源；代价是新增三段短脚本和一个 lock 文件，但职责更清楚，也比把平台二进制藏在插件管理器内部更适合 WSL。
+在这套边界下，迁移值得做：Zimfw 负责静态插件，独立 bootstrap/update 负责跨平台二进制与动态 completion，WSL 通过 `syncwin -d` 和本机重建获得相同功能。它能保留现有体验，并消除当前首键延迟的主要来源；代价是新增三段短脚本，但职责更清楚，也比把平台二进制藏在插件管理器内部更适合 WSL。
 
 ## 实施后验证记录
 

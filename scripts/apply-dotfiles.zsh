@@ -15,7 +15,6 @@ typeset -a sources=(
   .zsh/darwin.zsh
   .zsh/linux.zsh
   .zsh/starship.toml
-  .zsh/versions.lock
   .zsh/zimrc
   .zsh/zed.zsh
   .zsh/zsh.zsh
@@ -38,6 +37,13 @@ for relative in "${sources[@]}"; do
   command install -m "$target_mode" "$source_file" "$target_file.new"
   command mv -f "$target_file.new" "$target_file"
 done
+
+# Remove the retired pinned-version file after preserving a rollback copy.
+legacy_lock="$HOME/.zsh/versions.lock"
+if [[ -e "$legacy_lock" ]]; then
+  command cp -p "$legacy_lock" "$BACKUP_ROOT/.zsh/versions.lock"
+  command rm -f -- "$legacy_lock"
+fi
 
 mkdir -p "$HOME/.local/bin"
 ln -fs "$HOME/.zsh/bin/pnpx" "$HOME/.local/bin/pnpx"

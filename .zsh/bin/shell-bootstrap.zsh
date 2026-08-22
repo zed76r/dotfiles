@@ -2,13 +2,24 @@
 set -euo pipefail
 
 typeset -gr ZSH_CONFIG_DIR=${0:A:h:h}
-typeset -gr LOCK_FILE="$ZSH_CONFIG_DIR/versions.lock"
 typeset -gr BIN_DIR="$HOME/.local/bin"
 typeset -gr ZIM_CONFIG_FILE="$ZSH_CONFIG_DIR/zimrc"
 typeset -gr ZIM_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/zim"
+typeset -gi UPDATE_REQUESTED=0
 
-[[ -r "$LOCK_FILE" ]] || { print -u2 -- "missing lock file: $LOCK_FILE"; exit 1; }
-source "$LOCK_FILE"
+case ${1:-} in
+  '') ;;
+  --update) UPDATE_REQUESTED=1 ;;
+  -h|--help)
+    print -- "Usage: ${0:t} [--update]"
+    print -- 'Install missing shell tools; --update also upgrades them and Zimfw modules.'
+    exit 0
+    ;;
+  *)
+    print -u2 -- "${0:t}: unknown option: $1"
+    exit 2
+    ;;
+esac
 
 typeset task_tmp_dir
 task_tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/shell-bootstrap.XXXXXXXX")
@@ -20,6 +31,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p "$BIN_DIR" "$ZIM_HOME"
+[[ ":$PATH:" == *":$BIN_DIR:"* ]] || path=("$BIN_DIR" $path)
 
 download() {
   local url=$1 output=$2
@@ -31,6 +43,29 @@ download() {
     print -u2 -- 'shell-bootstrap: curl or wget is required'
     return 1
   fi
+}
+
+latest_release_tag() {
+  local repo=$1 payload tag
+  if (( $+commands[curl] )); then
+    payload=$(command curl -fsSL --retry 3 --connect-timeout 15 \
+      -H 'Accept: application/vnd.github+json' \
+      -H 'User-Agent: dotfiles-shell-update' \
+      "https://api.github.com/repos/${repo}/releases/latest")
+  elif (( $+commands[wget] )); then
+    payload=$(command wget -qO- --header='Accept: application/vnd.github+json' \
+      --header='User-Agent: dotfiles-shell-update' \
+      "https://api.github.com/repos/${repo}/releases/latest")
+  else
+    print -u2 -- 'shell-bootstrap: curl or wget is required to resolve latest releases'
+    return 1
+  fi
+  tag=$(print -r -- "$payload" | awk -F'"' '/"tag_name"[[:space:]]*:/ {print $4; exit}')
+  [[ -n "$tag" ]] || {
+    print -u2 -- "shell-bootstrap: latest release tag not found for $repo"
+    return 1
+  }
+  print -r -- "$tag"
 }
 
 sha256() {
@@ -57,19 +92,19 @@ platform_assets() {
   case "$os:$arch" in
     Darwin:arm64)
       STARSHIP_ASSET=starship-aarch64-apple-darwin.tar.gz
-      MISE_ASSET="mise-v${MISE_VERSION}-macos-arm64"
+      MISE_PLATFORM=macos-arm64
       ;;
     Darwin:x86_64)
       STARSHIP_ASSET=starship-x86_64-apple-darwin.tar.gz
-      MISE_ASSET="mise-v${MISE_VERSION}-macos-x64"
+      MISE_PLATFORM=macos-x64
       ;;
     Linux:aarch64|Linux:arm64)
       STARSHIP_ASSET=starship-aarch64-unknown-linux-musl.tar.gz
-      MISE_ASSET="mise-v${MISE_VERSION}-linux-arm64"
+      MISE_PLATFORM=linux-arm64
       ;;
     Linux:x86_64|Linux:amd64)
       STARSHIP_ASSET=starship-x86_64-unknown-linux-gnu.tar.gz
-      MISE_ASSET="mise-v${MISE_VERSION}-linux-x64"
+      MISE_PLATFORM=linux-x64
       ;;
     *)
       print -u2 -- "shell-bootstrap: unsupported platform $os/$arch"
@@ -80,26 +115,26 @@ platform_assets() {
 
 install_zimfw() {
   local target="$ZIM_HOME/zimfw.zsh" candidate="$task_tmp_dir/zimfw.zsh"
-  if [[ -s "$target" ]] && verify_sha256 "$target" "$ZIMFW_SHA256" 2>/dev/null; then
-    return 0
-  fi
-  download "https://github.com/zimfw/zimfw/releases/download/v${ZIMFW_VERSION}/zimfw.zsh" "$candidate"
-  verify_sha256 "$candidate" "$ZIMFW_SHA256"
+  [[ -s "$target" ]] && command zsh -n "$target" 2>/dev/null && return 0
+  download 'https://github.com/zimfw/zimfw/releases/latest/download/zimfw.zsh' "$candidate"
+  command zsh -n "$candidate"
   command install -m 0644 "$candidate" "$target.new"
   command mv -f "$target.new" "$target"
 }
 
-install_starship() {
-  local current= archive checksum expected extracted
+install_starship_latest() {
+  local latest current archive checksum expected extracted
+  latest=$(latest_release_tag starship/starship)
+  latest=${latest#v}
   if [[ -x "$BIN_DIR/starship" ]]; then
     current=$("$BIN_DIR/starship" --version 2>/dev/null | awk 'NR == 1 {print $2}')
+    [[ "$current" == "$latest" ]] && return 0
   fi
-  [[ "$current" == "$STARSHIP_VERSION" ]] && return 0
 
   archive="$task_tmp_dir/$STARSHIP_ASSET"
   checksum="$archive.sha256"
-  download "https://github.com/starship/starship/releases/download/v${STARSHIP_VERSION}/${STARSHIP_ASSET}" "$archive"
-  download "https://github.com/starship/starship/releases/download/v${STARSHIP_VERSION}/${STARSHIP_ASSET}.sha256" "$checksum"
+  download "https://github.com/starship/starship/releases/download/v${latest}/${STARSHIP_ASSET}" "$archive"
+  download "https://github.com/starship/starship/releases/download/v${latest}/${STARSHIP_ASSET}.sha256" "$checksum"
   expected=$(awk 'NR == 1 {print $1}' "$checksum")
   [[ -n "$expected" ]] || { print -u2 -- 'shell-bootstrap: invalid Starship checksum'; return 1; }
   verify_sha256 "$archive" "$expected"
@@ -110,18 +145,20 @@ install_starship() {
   command mv -f "$BIN_DIR/starship.new" "$BIN_DIR/starship"
 }
 
-install_mise() {
-  local current= binary sums expected
+install_mise_latest() {
+  local latest current binary sums expected
+  latest=$(latest_release_tag jdx/mise)
+  latest=${latest#v}
   if [[ -x "$BIN_DIR/mise" ]]; then
     current=$("$BIN_DIR/mise" --version 2>/dev/null | awk 'NR == 1 {print $1}')
+    [[ "$current" == "$latest" ]] && return 0
   fi
-  [[ "$current" == "$MISE_VERSION" ]] && return 0
 
-  binary="$task_tmp_dir/$MISE_ASSET"
+  binary="$task_tmp_dir/mise-v${latest}-${MISE_PLATFORM}"
   sums="$task_tmp_dir/SHASUMS256.txt"
-  download "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/${MISE_ASSET}" "$binary"
-  download "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/SHASUMS256.txt" "$sums"
-  expected=$(awk -v name="$MISE_ASSET" '$2 == name || $2 == "./" name || $2 == "*" name {print $1; exit}' "$sums")
+  download "https://github.com/jdx/mise/releases/download/v${latest}/${binary:t}" "$binary"
+  download "https://github.com/jdx/mise/releases/download/v${latest}/SHASUMS256.txt" "$sums"
+  expected=$(awk -v name="${binary:t}" '$2 == name || $2 == "./" name || $2 == "*" name {print $1; exit}' "$sums")
   [[ -n "$expected" ]] || { print -u2 -- 'shell-bootstrap: mise checksum not found'; return 1; }
   verify_sha256 "$binary" "$expected"
   command chmod 0755 "$binary"
@@ -130,47 +167,38 @@ install_mise() {
   command mv -f "$BIN_DIR/mise.new" "$BIN_DIR/mise"
 }
 
-module_path() {
-  local name=$1
-  if [[ -d "$ZIM_HOME/modules/$name/.git" ]]; then
-    print -r -- "$ZIM_HOME/modules/$name"
-  else
-    print -r -- "$ZIM_HOME/$name"
-  fi
+install_starship() {
+  [[ -x "$BIN_DIR/starship" ]] || install_starship_latest
 }
 
-lock_module() {
-  local name=$1 revision=$2 directory
-  directory=$(module_path "$name")
-  [[ -d "$directory/.git" ]] || {
-    print -u2 -- "shell-bootstrap: module not installed: $name"
-    return 1
-  }
-  if ! command git -C "$directory" cat-file -e "${revision}^{commit}" 2>/dev/null; then
-    command git -C "$directory" fetch --depth 1 origin "$revision"
-  fi
-  command git -C "$directory" checkout --quiet --detach "$revision"
+install_mise() {
+  [[ -x "$BIN_DIR/mise" ]] || install_mise_latest
 }
 
 install_modules() {
   source "$ZIM_HOME/zimfw.zsh" install
-  lock_module zsh-completions "$ZSH_COMPLETIONS_REV"
-  lock_module ohmyzsh "$OHMYZSH_REV"
-  lock_module history-search-multi-word "$HISTORY_SEARCH_MULTI_WORD_REV"
-  lock_module zsh-autosuggestions "$ZSH_AUTOSUGGESTIONS_REV"
-  lock_module fast-syntax-highlighting "$FAST_SYNTAX_HIGHLIGHTING_REV"
-  source "$ZIM_HOME/zimfw.zsh" build
-  # A synced zimrc can have a newer timestamp even when init.zsh content is
-  # already correct. Mark the successful locked build as converged.
-  command touch "$ZIM_HOME/init.zsh"
+}
+
+update_zimfw_and_modules() {
+  source "$ZIM_HOME/zimfw.zsh" upgrade -q
+  source "$ZIM_HOME/zimfw.zsh" update -q
 }
 
 platform_assets
 install_zimfw
+install_modules
 install_starship
 install_mise
+if (( UPDATE_REQUESTED )); then
+  update_zimfw_and_modules
+  install_starship_latest
+  install_mise_latest
+fi
 hash -r
-install_modules
 zsh "$ZSH_CONFIG_DIR/bin/refresh-completions.zsh"
 
-print -- "shell-bootstrap: ready (zimfw $ZIMFW_VERSION, starship $STARSHIP_VERSION, mise $MISE_VERSION)"
+if (( UPDATE_REQUESTED )); then
+  print -- 'shell-bootstrap: latest shell tools and Zimfw modules are ready'
+else
+  print -- 'shell-bootstrap: shell tools and Zimfw modules are ready'
+fi
